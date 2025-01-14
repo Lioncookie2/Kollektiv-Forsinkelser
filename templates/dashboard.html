@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="no">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sanntids Forsinkelser</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+    <div class="dashboard-container">
+        <div class="transport-selector">
+            <button class="transport-btn active" data-type="all">Alle transportmidler</button>
+            <button class="transport-btn" data-type="rail">Tog</button>
+            <button class="transport-btn" data-type="bus">Buss</button>
+            <button class="transport-btn" data-type="tram">Trikk</button>
+        </div>
+
+        <div class="stats-summary">
+            <h2>Sanntids forsinkelser</h2>
+            <div class="summary-cards">
+                <div class="summary-card">
+                    <h3>Antall avganger</h3>
+                    <div class="big-number" id="totalTrips">0</div>
+                </div>
+                <div class="summary-card">
+                    <h3>Gjennomsnittlig forsinkelse</h3>
+                    <div class="big-number" id="avgDelay">0</div>
+                    <div class="unit">minutter</div>
+                </div>
+                <div class="summary-card">
+                    <h3>Punktlighet</h3>
+                    <div class="big-number" id="punctuality">0</div>
+                    <div class="unit">%</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="stats-grid">
+            <!-- Siste uke -->
+            <div class="stat-card">
+                <h3>Siste uke</h3>
+                <canvas id="weeklyDelayChart"></canvas>
+                <div class="weekly-stats">
+                    <div class="stat-item">
+                        <span class="stat-label">Punktlighet:</span>
+                        <span class="stat-value" id="weeklyPunctuality">-%</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-label">Snitt forsinkelse:</span>
+                        <span class="stat-value" id="weeklyAvgDelay">- min</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Operatørstatistikk -->
+            <div class="stat-card wide">
+                <h3>Statistikk per operatør</h3>
+                <div class="operator-stats" id="operator-stats">
+                    <!-- Fylles dynamisk med JavaScript -->
+                </div>
+            </div>
+
+            <!-- Forsinkelsesfordeling -->
+            <div class="stat-card">
+                <h3>Fordeling av transportmidler</h3>
+                <div id="transportDistribution" class="transport-distribution">
+                    <div class="transport-type">
+                        <img src="{{ url_for('static', filename='icons/tog.svg') }}" alt="Tog">
+                        <div class="transport-info">
+                            <span class="transport-value"><span id="railPercentage">0</span>%</span>
+                        </div>
+                    </div>
+                    <div class="transport-type">
+                        <img src="{{ url_for('static', filename='icons/buss.svg') }}" alt="Buss">
+                        <div class="transport-info">
+                            <span class="transport-value"><span id="busPercentage">0</span>%</span>
+                        </div>
+                    </div>
+                    <div class="transport-type">
+                        <img src="{{ url_for('static', filename='icons/trikk.svg') }}" alt="Trikk">
+                        <div class="transport-info">
+                            <span class="transport-value"><span id="tramPercentage">0</span>%</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Forsinkelsesfordeling -->
+            <div class="stat-card">
+                <h3>Forsinkelsesfordeling (minutter)</h3>
+                <div class="chart-container">
+                    <canvas id="delayDistChart"></canvas>
+                </div>
+            </div>
+            
+            <!-- Toppforsinkelser -->
+            <div class="stat-card wide">
+                <h3>Største forsinkelser nå</h3>
+                <div class="delay-table-container">
+                    <table id="topDelays">
+                        <thead>
+                            <tr>
+                                <th>Linje</th>
+                                <th>Type</th>
+                                <th>Stasjon</th>
+                                <th>Forsinkelse</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <!-- Fylles dynamisk med JavaScript -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Total statistikk -->
+            <div class="stat-card">
+                <h3>Total ventetid i 2025</h3>
+                <div class="total-stats">
+                    <div class="total-delay">
+                        <span class="total-value" id="totalDelay">-</span>
+                        <span class="total-label">total ventetid</span>
+                    </div>
+                    <div class="transport-breakdown">
+                        <div class="breakdown-item">
+                            <span class="breakdown-label">Buss:</span>
+                            <span class="breakdown-value" id="busDelay">-</span>
+                        </div>
+                        <div class="breakdown-item">
+                            <span class="breakdown-label">Tog:</span>
+                            <span class="breakdown-value" id="trainDelay">-</span>
+                        </div>
+                        <div class="breakdown-item">
+                            <span class="breakdown-label">Trikk:</span>
+                            <span class="breakdown-value" id="tramDelay">-</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="{{ url_for('static', filename='js/dashboard.js') }}"></script>
+</body>
+</html> 
