@@ -6,7 +6,8 @@ from datetime import datetime
 logger = logging.getLogger(__name__)
 
 class EnturClient:
-    def __init__(self):
+    def __init__(self, client_id=None):
+        self.client_id = client_id or "kollektiv-forsinkelser"
         self.base_url = "https://api.entur.io/realtime/v1/rest/vm"
         self.headers = {
             'ET-Client-Name': 'togtrafikk-monitor',

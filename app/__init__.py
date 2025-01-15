@@ -1,6 +1,7 @@
 from flask import Flask
 from app.extensions import db
 from app.scheduler import start_scheduler
+from app.config import Config
 import os
 
 app = Flask(__name__, 
@@ -8,9 +9,8 @@ app = Flask(__name__,
     template_folder='../templates'
 )
 
-# Database configuration
-app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///instance/app.db'
-app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+# Load config
+app.config.from_object(Config)
 
 # Initialize extensions
 db.init_app(app)
