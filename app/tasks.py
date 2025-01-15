@@ -9,9 +9,10 @@ logger = logging.getLogger(__name__)
 def update_delays():
     """Update delays in the database"""
     try:
-        data = entur_client.get_delays()
+        data = entur_client.get_realtime_data()
         
         if not data:
+            logger.error("No data received from Entur API")
             return
         
         # Clear old delays
@@ -19,11 +20,14 @@ def update_delays():
         
         # Add new delays
         for activity in data.get('activities', []):
-            delay = activity.get('delay', 0)
+            monitored_vehicle_journey = activity.get('monitoredVehicleJourney', {})
+            monitored_call = monitored_vehicle_journey.get('monitoredCall', {})
+            
+            delay = monitored_call.get('delay', 0)
             if delay > 0:
-                line = activity.get('monitoredVehicleJourney', {}).get('lineRef', '')
-                station = activity.get('monitoredVehicleJourney', {}).get('monitoredCall', {}).get('stopPointName', '')
-                transport_type = activity.get('monitoredVehicleJourney', {}).get('vehicleMode', '').lower()
+                line = monitored_vehicle_journey.get('lineRef', '')
+                station = monitored_call.get('stopPointName', '')
+                transport_type = monitored_vehicle_journey.get('vehicleMode', '').lower()
                 
                 new_delay = Delay(
                     line=line,
