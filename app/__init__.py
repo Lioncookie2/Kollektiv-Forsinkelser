@@ -5,15 +5,11 @@ from app.config import Config
 import os
 
 def create_app():
-    app = Flask(__name__, 
-        static_url_path='',
-        static_folder='../static',
-        template_folder='../templates'
-    )
-
+    app = Flask(__name__)
+    
     # Load config
     app.config.from_object(Config)
-
+    
     # Initialize extensions
     db.init_app(app)
 
@@ -28,14 +24,12 @@ def create_app():
     with app.app_context():
         db.create_all()
 
+    # Register routes
+    from app.routes import init_routes
+    app = init_routes(app)
+
     # Start scheduler with app context
     scheduler = start_scheduler(app)
     app.scheduler = scheduler
 
-    # Register routes
-    from app.routes import init_routes
-    init_routes(app)
-
-    return app
-
-app = create_app() 
+    return app 
