@@ -31,8 +31,9 @@ def create_app():
     scheduler = start_scheduler(app)
     app.scheduler = scheduler
 
-    # Import routes after app is created
-    from app import routes
+    # Register routes
+    from app.routes import init_routes
+    init_routes(app)
 
     return app
 
