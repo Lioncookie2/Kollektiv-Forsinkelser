@@ -1,21 +1,31 @@
+<<<<<<< HEAD
 import requests
 import xml.etree.ElementTree as ET
 import time
+=======
+>>>>>>> 8196abb55e146a617c71e9bf3633120aaeba0d08
 from datetime import datetime
+import requests
+import logging
 
+<<<<<<< HEAD
+=======
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+>>>>>>> 8196abb55e146a617c71e9bf3633120aaeba0d08
 class EnturClient:
-    def __init__(self):
-        self.base_url = "https://api.entur.io/realtime/v1/rest/vm"
+    def __init__(self, client_id=None):
+        self.client_id = client_id or "kollektiv-forsinkelser"
+        self.url = "https://api.entur.io/realtime/v1/rest/et"
         self.headers = {
-            'ET-Client-Name': 'togtrafikk-monitor',
-            'Accept': 'application/xml'
-        }
-        self.ns = {
-            'ns': 'http://www.siri.org.uk/siri'
+            "ET-Client-Name": self.client_id,
+            "Accept": "application/json"
         }
         self.last_request_time = 0
         self.min_request_interval = 15
 
+<<<<<<< HEAD
     def get_realtime_data(self, transport_type=None):
         try:
             current_time = time.time()
@@ -111,21 +121,19 @@ class EnturClient:
             
         except Exception as e:
             return []
+=======
+    def get_realtime_data(self):
+        """Get realtime data from Entur API"""
+        try:
+            response = requests.get(self.url, headers=self.headers)
+            response.raise_for_status()
+            return response.json()
+        except Exception as e:
+            logger.error(f"Error fetching delays: {e}")
+            return None
 
-    def _parse_datetime(self, dt_str: str) -> datetime:
-        """Konverterer ISO datetime string til datetime objekt"""
-        return datetime.fromisoformat(dt_str.replace('Z', '+00:00'))
+    # Alias for compatibility
+    get_delays = get_realtime_data
+>>>>>>> 8196abb55e146a617c71e9bf3633120aaeba0d08
 
-    def _get_dataset_for_transport(self, transport_type):
-        """Velger riktig datasett basert på transporttype"""
-        if transport_type == 'rail':
-            return {'id': 'BNR', 'name': 'Bane NOR'}
-        elif transport_type in ['bus', 'tram']:
-            return {'id': 'RUT', 'name': 'Ruter'}
-        else:
-            return {'id': None, 'name': 'Alle'}
-
-client = EnturClient()
-data = client.get_realtime_data(transport_type='bus')  # Endre til ønsket transporttype, f.eks. 'train'
-print(data)
-print(data)
+entur_client = EnturClient()

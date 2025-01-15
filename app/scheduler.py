@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 from app import db, app
 from app.models import Delay
 from app.entur_client import EnturClient
@@ -6,10 +7,18 @@ from sqlalchemy.exc import IntegrityError
 
 def start_scheduler(app):
     from apscheduler.schedulers.background import BackgroundScheduler
+=======
+from apscheduler.schedulers.background import BackgroundScheduler
+from app.tasks import update_delays
+from flask import current_app
+
+def start_scheduler(app):
+>>>>>>> 8196abb55e146a617c71e9bf3633120aaeba0d08
     scheduler = BackgroundScheduler()
     
     def scheduled_task():
         with app.app_context():
+<<<<<<< HEAD
             try:
                 client = EnturClient()
                 vehicles = client.get_realtime_data()
@@ -59,5 +68,17 @@ def start_scheduler(app):
         id='check_delays'
     )
     
+=======
+            update_delays()
+    
+    scheduler.add_job(
+        scheduled_task,
+        'interval',
+        minutes=1,
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=None
+    )
+>>>>>>> 8196abb55e146a617c71e9bf3633120aaeba0d08
     scheduler.start()
     return scheduler 
