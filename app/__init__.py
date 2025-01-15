@@ -6,7 +6,10 @@ import os
 # Initialiser Flask med custom template og static folder
 template_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'templates'))
 static_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'static'))
-app = Flask(__name__, template_folder=template_dir, static_folder=static_dir)
+app = Flask(__name__, 
+    static_folder='../static',
+    template_folder='../templates'
+)
 
 # Database konfigurasjon
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///app.db'
