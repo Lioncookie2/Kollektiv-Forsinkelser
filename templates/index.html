@@ -38,17 +38,19 @@
 
         <div class="stats-grid">
             <!-- Siste uke -->
-            <div class="stat-card">
+            <div class="summary-card">
                 <h3>Siste uke</h3>
-                <canvas id="weeklyDelayChart"></canvas>
-                <div class="weekly-stats">
+                <div class="chart-container">
+                    <canvas id="weeklyDelayChart"></canvas>
+                </div>
+                <div class="stat-footer">
                     <div class="stat-item">
-                        <span class="stat-label">Punktlighet:</span>
-                        <span class="stat-value" id="weeklyPunctuality">-%</span>
+                        <div class="stat-label">Totalt denne uken:</div>
+                        <div class="stat-value total-delays">-</div>
                     </div>
                     <div class="stat-item">
-                        <span class="stat-label">Snitt forsinkelse:</span>
-                        <span class="stat-value" id="weeklyAvgDelay">- min</span>
+                        <div class="stat-label">Verste dag:</div>
+                        <div class="stat-value worst-day">-</div>
                     </div>
                 </div>
             </div>
@@ -86,13 +88,6 @@
                 </div>
             </div>
             
-            <!-- Forsinkelsesfordeling -->
-            <div class="stat-card">
-                <h3>Forsinkelsesfordeling (minutter)</h3>
-                <div class="chart-container">
-                    <canvas id="delayDistChart"></canvas>
-                </div>
-            </div>
             
             <!-- Toppforsinkelser -->
             <div class="stat-card wide">

@@ -1,236 +1,264 @@
-console.log("Dashboard.js er lastet!");
+document.addEventListener('DOMContentLoaded', function() {
+    let selectedType = 'all';
+    let weeklyChart = null;
+    let delayDistChart = null;
 
-// Håndter transport-type knapper
-document.querySelectorAll('.transport-btn').forEach(button => {
-    button.addEventListener('click', function() {
-        // Fjern active class fra alle knapper
-        document.querySelectorAll('.transport-btn').forEach(btn => {
-            btn.classList.remove('active');
-        });
-        // Legg til active class på den klikkede knappen
-        this.classList.add('active');
+    // Funksjon for å oppdatere data
+    function updateData() {
+        const selectedType = document.querySelector('.transport-btn.active').dataset.type;
+        console.log('Fetching data for transport type:', selectedType);
         
-        // Hent data for valgt transporttype
-        const transportType = this.dataset.type;
-        updateStats(transportType);
+        // Hent total statistikk
+        fetch(`/total_stats?transport_type=${selectedType}`)
+            .then(response => response.json())
+            .then(data => {
+                console.log('Total stats:', data);
+                document.getElementById('totalTrips').textContent = data.total_trips;
+                document.getElementById('avgDelay').textContent = data.avg_delay.toFixed(1);
+                document.getElementById('punctuality').textContent = data.punctuality.toFixed(1);
+            })
+            .catch(error => console.error('Error fetching total stats:', error));
+
+        // Hent transporttype-spesifikk statistikk
+        fetch(`/api/stats?transport_type=${selectedType}`)
+            .then(response => response.json())
+            .then(data => {
+                console.log('Transport stats:', data);
+                updateDelayStats(data);
+            })
+            .catch(error => console.error('Error fetching transport stats:', error));
+
+        // Hent operatørstatistikk
+        fetch(`/operator_stats?transport_type=${selectedType}`)
+            .then(response => response.json())
+            .then(data => {
+                updateOperatorStats(data);
+            })
+            .catch(error => console.error('Error fetching operator stats:', error));
+
+        // Hent ukentlig statistikk
+        fetch(`/weekly_stats?transport_type=${selectedType}`)
+            .then(response => response.json())
+            .then(response => {
+                console.log('Weekly stats data:', response);
+                if (response.data && response.data.length > 0) {
+                    updateWeeklyChart(response.data);
+                }
+            })
+            .catch(error => console.error('Error:', error));
+
+        // Hent forsinkelsesfordeling
+        fetch(`/delay_distribution?transport_type=${selectedType}`)
+            .then(response => response.json())
+            .then(data => {
+                console.log('Delay distribution data:', data);
+                if (Object.keys(data).length > 0) {
+                    updateDelayDistribution(data);
+                }
+            })
+            .catch(error => console.error('Error:', error));
+
+        // Hent total ventetid
+        fetch('/total_waiting_time')
+            .then(response => response.json())
+            .then(data => {
+                updateTotalWaitingTime(data);
+            })
+            .catch(error => console.error('Error fetching total waiting time:', error));
+
+        // Hent største forsinkelser med valgt transporttype
+        fetch(`/top_delays?transport_type=${selectedType}`)
+            .then(response => response.json())
+            .then(data => {
+                updateTopDelays(data);
+            })
+            .catch(error => console.error('Error fetching top delays:', error));
+
+        // Hent linjestatistikk
+        fetch(`/line_stats?transport_type=${selectedType}`)
+            .then(response => {
+                console.log('Line stats response:', response);
+                return response.json();
+            })
+            .then(data => {
+                console.log('Line stats data received:', data);
+                updateLineStats(data);
+            })
+            .catch(error => {
+                console.error('Error fetching line stats:', error);
+                // Vis feilmelding i grensesnittet
+                const container = document.querySelector('.operator-stats');
+                container.innerHTML = `
+                    <div class="error-message">
+                        Kunne ikke hente linjestatistikk. Prøv igjen senere.
+                    </div>
+                `;
+            });
+
+        // Oppdater transportfordeling
+        updateTransportDistribution();
+    }
+
+    // Oppdater transport-knapper
+    document.querySelectorAll('.transport-btn').forEach(button => {
+        button.addEventListener('click', function() {
+            document.querySelectorAll('.transport-btn').forEach(btn => 
+                btn.classList.remove('active'));
+            this.classList.add('active');
+            selectedType = this.dataset.type;
+            updateData();
+        });
     });
+
+    // Initial update
+    updateData();
+
+    // Update every minute
+    setInterval(updateData, 60000);
 });
 
-function updateStats(transportType = 'all') {
-    console.log(`Henter statistikk for ${transportType}`);
-    fetch(`/api/stats?transport_type=${transportType}`)
-        .then(response => response.json())
-        .then(data => {
-            console.log("Mottatt statistikk:", data);
-            
-            // Oppdater sanntids-statistikk
-            document.getElementById('totalTrips').textContent = 
-                data.summary.total_trips;
-            document.getElementById('avgDelay').textContent = 
-                data.summary.avg_delay.toFixed(1);
-            document.getElementById('punctuality').textContent = 
-                data.summary.punctuality.toFixed(1);
-            
-            // Oppdater transportfordeling
-            updateTransportDistribution(data.transport_distribution);
-            
-            // Oppdater andre deler av dashbordet
-            updateTopDelays(data.top_delays);
-            updateDelayDistribution(data.delay_distribution);
-        })
-        .catch(error => {
-            console.error('Feil ved oppdatering av statistikk:', error);
-        });
-}
-
-function updateWeeklyStats() {
-    console.log("Henter ukentlig statistikk...");
-    fetch('/weekly_stats')
-        .then(response => response.json())
-        .then(data => {
-            console.log("Mottatt ukentlig statistikk:", data);
-            
-            if (data.error) {
-                console.error("Feil fra server:", data.error);
-                return;
-            }
-            
-            // Oppdater statistikk
-            document.getElementById('weeklyPunctuality').textContent = 
-                `${data.punctuality || 0}%`;
-            document.getElementById('weeklyAvgDelay').textContent = 
-                `${data.avg_delay || 0} min`;
-            
-            // Konverter datoer til ukedager
-            const dates = data.dates.map(formatNorwegianDate);
-            
-            // Oppdater grafen
-            const ctx = document.getElementById('weeklyDelayChart');
-            if (!ctx) {
-                console.error("Fant ikke canvas element");
-                return;
-            }
-            
-            if (window.weeklyChart) {
-                window.weeklyChart.destroy();
-            }
-            
-            window.weeklyChart = new Chart(ctx, {
-                type: 'bar',
-                data: {
-                    labels: dates,
-                    datasets: [{
-                        label: 'Forsinkelser (minutter)',
-                        data: data.total_minutes,
-                        backgroundColor: 'rgba(75, 192, 192, 0.6)',
-                        borderColor: 'rgba(75, 192, 192, 1)',
-                        borderWidth: 1
-                    }]
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    scales: {
-                        y: {
-                            beginAtZero: true,
-                            grid: {
-                                color: 'rgba(0, 0, 0, 0.1)'
-                            }
-                        },
-                        x: {
-                            grid: {
-                                display: false
-                            },
-                            ticks: {
-                                autoSkip: false,
-                                maxRotation: 0,
-                                minRotation: 0
-                            }
-                        }
-                    },
-                    plugins: {
-                        legend: {
-                            display: true,
-                            position: 'top'
-                        }
-                    }
-                }
-            });
-        })
-        .catch(error => {
-            console.error("Feil ved henting av ukentlig statistikk:", error);
-        });
-}
-
-function updateTotalStats() {
-    console.log("Henter total statistikk...");
-    fetch('/total_stats')
-        .then(response => response.json())
-        .then(data => {
-            document.getElementById('totalDelay').textContent = 
-                formatDuration(data.total_minutes);
-            document.getElementById('busDelay').textContent = 
-                formatDuration(data.bus_minutes);
-            document.getElementById('trainDelay').textContent = 
-                formatDuration(data.train_minutes);
-            document.getElementById('tramDelay').textContent = 
-                formatDuration(data.tram_minutes);
-        })
-        .catch(error => console.error("Feil ved henting av total statistikk:", error));
-}
-
-function formatDuration(minutes) {
-    if (minutes < 60) {
-        return `${minutes} minutter`;
-    } else if (minutes < 1440) {
-        const hours = Math.floor(minutes / 60);
-        const mins = minutes % 60;
-        return `${hours} timer${mins > 0 ? ` og ${mins} minutter` : ''}`;
-    } else {
-        const days = Math.floor(minutes / 1440);
-        const hours = Math.floor((minutes % 1440) / 60);
-        return `${days} dager${hours > 0 ? ` og ${hours} timer` : ''}`;
+function updateDelayStats(delays) {
+    // Beregn statistikk basert på forsinkelsesdata
+    let totalDelays = delays.length;
+    let avgDelay = delays.reduce((sum, d) => sum + d.delay_minutes, 0) / totalDelays || 0;
+    
+    // Oppdater UI
+    document.getElementById('totalTrips').textContent = totalDelays;
+    document.getElementById('avgDelay').textContent = avgDelay.toFixed(1);
+    
+    // Beregn transporttype-fordeling
+    let types = {
+        'rail': 0,
+        'bus': 0,
+        'tram': 0
+    };
+    
+    delays.forEach(d => {
+        if (d.transport_type === 'rail') types.rail++;
+        if (d.transport_type === 'bus') types.bus++;
+        if (d.transport_type === 'tram') types.tram++;
+    });
+    
+    // Oppdater prosentandeler
+    let total = Object.values(types).reduce((a, b) => a + b, 0);
+    if (total > 0) {
+        document.getElementById('railPercentage').textContent = 
+            ((types.rail / total) * 100).toFixed(1);
+        document.getElementById('busPercentage').textContent = 
+            ((types.bus / total) * 100).toFixed(1);
+        document.getElementById('tramPercentage').textContent = 
+            ((types.tram / total) * 100).toFixed(1);
     }
 }
 
-function updateSummaryStats(summary) {
-    if (!summary) return;
+function updateWeeklyChart(data) {
+    console.log('Updating weekly chart with data:', data);
+    const ctx = document.getElementById('weeklyDelayChart').getContext('2d');
     
-    document.getElementById('totalTrips').textContent = summary.total_trips || '0';
-    document.getElementById('avgDelay').textContent = summary.avg_delay?.toFixed(1) || '0';
-    document.getElementById('punctuality').textContent = summary.punctuality?.toFixed(1) || '0';
-}
-
-function updateTopDelays(delays) {
-    if (!delays) return;
+    if (window.weeklyDelayChart instanceof Chart) {
+        window.weeklyDelayChart.destroy();
+    }
     
-    const tbody = document.querySelector('#topDelays tbody');
-    tbody.innerHTML = ''; // Tøm eksisterende innhold
+    // Finn maksverdi for y-aksen
+    const maxValue = Math.max(...data.map(d => d.count));
+    const yMax = Math.ceil(maxValue * 1.2);  // Legg til 20% margin på toppen
     
-    delays.forEach(delay => {
-        const row = document.createElement('tr');
-        row.innerHTML = `
-            <td>${delay.line}</td>
-            <td>${delay.type}</td>
-            <td>${delay.station}</td>
-            <td>${delay.delay} min</td>
-        `;
-        tbody.appendChild(row);
+    window.weeklyDelayChart = new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels: data.map(d => `${d.weekday}\n${d.date}`),
+            datasets: [{
+                data: data.map(d => d.count),
+                backgroundColor: 'rgba(75, 192, 192, 0.6)',
+                borderColor: 'rgba(75, 192, 192, 1)',
+                borderWidth: 1,
+                barThickness: 30
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: {
+                    display: false
+                }
+            },
+            scales: {
+                y: {
+                    beginAtZero: true,
+                    max: yMax,
+                    ticks: {
+                        stepSize: Math.ceil(yMax / 5),
+                        font: {
+                            size: 11
+                        }
+                    }
+                },
+                x: {
+                    grid: {
+                        display: false
+                    },
+                    ticks: {
+                        font: {
+                            size: 11
+                        }
+                    }
+                }
+            }
+        }
     });
+
+    // Beregn totalt antall forsinkelser
+    const totalDelays = data.reduce((sum, day) => sum + day.count, 0);
+    
+    // Finn verste dag
+    const worstDay = data.reduce((worst, current) => 
+        current.count > worst.count ? current : worst
+    );
+    
+    // Oppdater statistikk
+    document.querySelector('.total-delays').textContent = `${totalDelays} forsinkelser`;
+    document.querySelector('.worst-day').textContent = `${worstDay.weekday} (${worstDay.count})`;
 }
 
-function updateTransportDistribution(distribution) {
-    if (!distribution) return;
+function updateDelayDistribution(data) {
+    const ctx = document.getElementById('delayDistChart').getContext('2d');
     
-    // Oppdater prosentene direkte fra transport_distribution objektet
-    document.getElementById('railPercentage').textContent = 
-        distribution.rail.percentage.toFixed(1);
-    document.getElementById('busPercentage').textContent = 
-        distribution.bus.percentage.toFixed(1);
-    document.getElementById('tramPercentage').textContent = 
-        distribution.tram.percentage.toFixed(1);
-    
-    console.log('Transportfordeling oppdatert:', distribution);
-}
-
-function updateDelayDistribution(distribution) {
-    if (!distribution) return;
-    
-    const ctx = document.getElementById('delayDistChart');
-    if (!ctx) return;
-    
-    const chartData = {
-        labels: ['0-5', '5-10', '10-15', '15-30', '30+'],
-        datasets: [{
-            label: 'Forsinkelser (%)',
-            data: [
-                distribution['0-5'] || 0,
-                distribution['5-10'] || 0,
-                distribution['10-15'] || 0,
-                distribution['15-30'] || 0,
-                distribution['30+'] || 0
-            ],
-            backgroundColor: 'rgba(54, 162, 235, 0.6)',
-            borderColor: 'rgba(54, 162, 235, 1)',
-            borderWidth: 1
-        }]
-    };
-
-    if (window.delayDistChart) {
+    // Riktig måte å sjekke og ødelegge eksisterende chart
+    if (window.delayDistChart instanceof Chart) {
         window.delayDistChart.destroy();
     }
     
     window.delayDistChart = new Chart(ctx, {
         type: 'bar',
-        data: chartData,
+        data: {
+            labels: Object.keys(data),
+            datasets: [{
+                label: 'Antall forsinkelser',
+                data: Object.values(data),
+                backgroundColor: 'rgba(54, 162, 235, 0.5)',
+                borderColor: 'rgba(54, 162, 235, 1)',
+                borderWidth: 1
+            }]
+        },
         options: {
             responsive: true,
             maintainAspectRatio: false,
+            plugins: {
+                legend: {
+                    display: false
+                }
+            },
             scales: {
                 y: {
                     beginAtZero: true,
                     ticks: {
-                        callback: value => `${value}%`
+                        stepSize: 1
+                    }
+                },
+                x: {
+                    grid: {
+                        display: false
                     }
                 }
             }
@@ -238,87 +266,195 @@ function updateDelayDistribution(distribution) {
     });
 }
 
-function updateOperatorStats(stats) {
-    if (!stats) return;
+function updateTotalWaitingTime(data) {
+    // Oppdater total ventetid
+    document.getElementById('totalDelay').textContent = data.formatted_total;
     
-    const container = document.getElementById('operator-stats');
+    // Oppdater per transporttype (konverter til timer)
+    document.getElementById('busDelay').textContent = 
+        Math.round(data.bus / 60) + ' timer';
+    document.getElementById('trainDelay').textContent = 
+        Math.round(data.rail / 60) + ' timer';
+    document.getElementById('tramDelay').textContent = 
+        Math.round(data.tram / 60) + ' timer';
+}
+
+function updateTopDelays(delays) {
+    const tbody = document.querySelector('#topDelays tbody');
+    tbody.innerHTML = '';
+    
+    if (delays.length === 0) {
+        const row = document.createElement('tr');
+        row.innerHTML = `
+            <td colspan="4" class="no-delays">Ingen forsinkelser</td>
+        `;
+        tbody.appendChild(row);
+        return;
+    }
+    
+    delays.forEach(delay => {
+        const row = document.createElement('tr');
+        row.innerHTML = `
+            <td>${delay.line}</td>
+            <td>${getTransportIcon(delay.transport_type)}</td>
+            <td>${delay.station}</td>
+            <td>${delay.delay_minutes} min</td>
+        `;
+        tbody.appendChild(row);
+    });
+}
+
+function getTransportIcon(type) {
+    const icons = {
+        'bus': '🚌',
+        'rail': '🚂',
+        'tram': '🚊'
+    };
+    return icons[type] || '🚌';
+}
+
+function updateOperatorStats(data) {
+    const container = document.querySelector('.operator-stats');
     container.innerHTML = ''; // Tøm eksisterende innhold
-    
-    stats.forEach(operator => {
+
+    // Sorter operatører etter antall forsinkelser
+    const sortedOperators = Object.entries(data)
+        .sort(([,a], [,b]) => b.delays - a.delays);
+
+    sortedOperators.forEach(([operator, stats]) => {
         const operatorDiv = document.createElement('div');
-        operatorDiv.className = 'operator-stat';
+        operatorDiv.className = 'operator-item';
+        
+        const avgDelay = stats.total_delay_minutes / stats.delays;
+        const punctuality = 100 - (stats.delays / stats.total_trips * 100);
+
         operatorDiv.innerHTML = `
-            <div class="operator-name">${operator.name}</div>
-            <div class="operator-values">
-                <div class="operator-value">
-                    <span class="value-label">Punktlighet:</span>
-                    <span class="value-number">${operator.punctuality.toFixed(1)}%</span>
+            <div class="operator-header">
+                <h4>${operator}</h4>
+                <span class="operator-type">${stats.transport_type}</span>
+            </div>
+            <div class="operator-stats-grid">
+                <div class="stat-item">
+                    <span class="stat-value">${stats.delays}</span>
+                    <span class="stat-label">Forsinkelser</span>
                 </div>
-                <div class="operator-value">
-                    <span class="value-label">Snitt forsinkelse:</span>
-                    <span class="value-number">${operator.avg_delay.toFixed(1)} min</span>
+                <div class="stat-item">
+                    <span class="stat-value">${avgDelay.toFixed(1)}</span>
+                    <span class="stat-label">Snitt (min)</span>
+                </div>
+                <div class="stat-item">
+                    <span class="stat-value">${punctuality.toFixed(1)}%</span>
+                    <span class="stat-label">Punktlighet</span>
                 </div>
             </div>
         `;
+        
         container.appendChild(operatorDiv);
     });
 }
 
-function formatNorwegianDate(dateStr) {
-    try {
-        // Sjekk om dateStr er gyldig
-        if (!dateStr || typeof dateStr !== 'string') {
-            console.error('Ugyldig datostreng:', dateStr);
-            return dateStr;
-        }
+function updateLineStats(data) {
+    console.log('Updating line stats with data:', data);
+    
+    const container = document.querySelector('.operator-stats');
+    container.innerHTML = '<h3>Topp 5 mest forsinkede linjer (siste 24t)</h3>';
 
-        // Håndter både "DD.MM" og "YYYY-MM-DD" format
-        let day, month;
-        if (dateStr.includes('.')) {
-            [day, month] = dateStr.split('.');
-        } else if (dateStr.includes('-')) {
-            const parts = dateStr.split('-');
-            month = parts[1];
-            day = parts[2];
-        } else {
-            console.error('Ukjent datoformat:', dateStr);
-            return dateStr;
-        }
+    const sortedLines = Object.entries(data)
+        .sort(([,a], [,b]) => b.total_delay_minutes - a.total_delay_minutes);
+    
+    console.log('Sorted lines:', sortedLines);
 
-        // Lag en dato-streng med ISO format
-        const dateObj = new Date(2025, parseInt(month) - 1, parseInt(day));
-        
-        // Verifiser at datoen er gyldig
-        if (isNaN(dateObj.getTime())) {
-            console.error('Ugyldig dato:', dateStr);
-            return dateStr;
-        }
-
-        // Hent ukedag på norsk (full navn)
-        const weekdays = ['Søndag', 'Mandag', 'Tirsdag', 'Onsdag', 'Torsdag', 'Fredag', 'Lørdag'];
-        const weekday = weekdays[dateObj.getDay()];
-        
-        // Formater datoen som "DD.MM" og returner med ukedag først
-        const formattedDate = `${day.padStart(2, '0')}.${month.padStart(2, '0')}`;
-        return `${weekday}\n${formattedDate}`;
-    } catch (e) {
-        console.error("Feil ved datoformatering:", e, dateStr);
-        return dateStr;
+    if (sortedLines.length === 0) {
+        container.innerHTML += `
+            <div class="no-data">
+                Ingen forsinkelser funnet for valgt transporttype
+            </div>
+        `;
+        return;
     }
+
+    sortedLines.forEach(([line, stats]) => {
+        console.log(`Creating element for line ${line}:`, stats);
+        
+        const lineDiv = document.createElement('div');
+        lineDiv.className = 'operator-item';
+        
+        const transportIcon = {
+            'bus': '🚌',
+            'rail': '🚂',
+            'tram': '🚊'
+        }[stats.transport_type] || '🚌';
+
+        lineDiv.innerHTML = `
+            <div class="operator-header">
+                <h4>${transportIcon} Linje ${line}</h4>
+                <span class="operator-type">${stats.transport_type}</span>
+            </div>
+            <div class="operator-stats-grid">
+                <div class="stat-item">
+                    <span class="stat-value">${stats.delays} / ${stats.total_trips}</span>
+                    <span class="stat-label">Andel forsinkelser</span>
+                </div>
+                <div class="stat-item">
+                    <span class="stat-value">${stats.avg_delay}</span>
+                    <span class="stat-label">Snitt (min)</span>
+                </div>
+                <div class="stat-item">
+                    <span class="stat-value">${stats.total_delay_minutes}</span>
+                    <span class="stat-label">Total (min)</span>
+                </div>
+            </div>
+        `;
+        
+        container.appendChild(lineDiv);
+    });
 }
 
-// Start oppdateringer når siden lastes
-document.addEventListener('DOMContentLoaded', () => {
-    console.log("Starter statistikk-oppdateringer...");
-    updateStats('all');
-    updateWeeklyStats();
-    updateTotalStats();
+function updateTransportDistribution() {
+    fetch('/transport_distribution')
+        .then(response => response.json())
+        .then(data => {
+            // Oppdater prosentvisning med animasjon
+            animateValue('railPercentage', data.rail);
+            animateValue('busPercentage', data.bus);
+            animateValue('tramPercentage', data.tram);
+            
+            // Oppdater bakgrunnsfarge basert på prosent
+            updateTransportBackground('rail', data.rail);
+            updateTransportBackground('bus', data.bus);
+            updateTransportBackground('tram', data.tram);
+        })
+        .catch(error => console.error('Error:', error));
+}
+
+function animateValue(elementId, end) {
+    const element = document.getElementById(elementId);
+    const start = parseInt(element.textContent);
+    const duration = 1000; // 1 sekund
+    const startTime = performance.now();
     
-    // Oppdater hvert 30. sekund
-    setInterval(() => {
-        const activeTransportType = document.querySelector('.transport-btn.active').dataset.type;
-        updateStats(activeTransportType);
-        updateWeeklyStats();
-        updateTotalStats();
-    }, 30000);
-}); 
+    function update(currentTime) {
+        const elapsed = currentTime - startTime;
+        const progress = Math.min(elapsed / duration, 1);
+        
+        const value = Math.floor(start + (end - start) * progress);
+        element.textContent = value;
+        
+        if (progress < 1) {
+            requestAnimationFrame(update);
+        }
+    }
+    
+    requestAnimationFrame(update);
+}
+
+function updateTransportBackground(type, percentage) {
+    const container = document.querySelector(`.transport-type img[alt="${type === 'rail' ? 'Tog' : type === 'bus' ? 'Buss' : 'Trikk'}"]`)
+        .closest('.transport-type');
+    
+    // Beregn opacity basert på prosent (0-100 blir til 0.1-1.0)
+    const opacity = 0.1 + (percentage / 100) * 0.9;
+    
+    // Sett bakgrunnsfarge med variabel opacity
+    container.style.backgroundColor = `rgba(var(--primary-rgb), ${opacity})`;
+} 

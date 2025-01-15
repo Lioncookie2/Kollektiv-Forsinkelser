@@ -3,13 +3,12 @@ from datetime import datetime
 
 class Delay(db.Model):
     id = db.Column(db.Integer, primary_key=True)
-    line = db.Column(db.String(20), nullable=False)
-    line_name = db.Column(db.String(100))
-    transport_type = db.Column(db.String(20), nullable=False)
+    timestamp = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    line = db.Column(db.String(50), nullable=False)
+    station = db.Column(db.String(100), nullable=False)
     delay_minutes = db.Column(db.Integer, nullable=False)
-    station = db.Column(db.String(100))
-    timestamp = db.Column(db.DateTime, default=datetime.utcnow)
-    journey_reference = db.Column(db.String(100), unique=True)  # Unikt ID for hver reise
+    transport_type = db.Column(db.String(20), nullable=False)
+    journey_reference = db.Column(db.String(100), unique=True)
     
     def __repr__(self):
         return f'<Delay {self.line} {self.delay_minutes}min>'

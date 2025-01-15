@@ -1,9 +1,7 @@
 import requests
 import xml.etree.ElementTree as ET
-import logging
+import time
 from datetime import datetime
-
-logger = logging.getLogger(__name__)
 
 class EnturClient:
     def __init__(self):
@@ -15,11 +13,16 @@ class EnturClient:
         self.ns = {
             'ns': 'http://www.siri.org.uk/siri'
         }
+        self.last_request_time = 0
+        self.min_request_interval = 15
 
     def get_realtime_data(self, transport_type=None):
-        """Henter sanntidsdata for spesifisert transporttype"""
         try:
-            logger.info("Starter datahenting fra Entur API...")
+            current_time = time.time()
+            time_since_last_request = current_time - self.last_request_time
+            
+            if time_since_last_request < self.min_request_interval:
+                time.sleep(self.min_request_interval - time_since_last_request)
             
             response = requests.get(
                 self.base_url,
@@ -27,24 +30,24 @@ class EnturClient:
                 timeout=30
             )
             
+            self.last_request_time = time.time()
+            
             if response.status_code == 200:
                 root = ET.fromstring(response.text)
-                vehicles = self._parse_vehicles(root, transport_type)
-                logger.info(f"Totalt hentet {len(vehicles)} kjøretøy")
-                return vehicles
+                return self._parse_vehicles(root, transport_type)
+            elif response.status_code == 429:
+                time.sleep(30)
+                return []
             else:
-                logger.error(f"Feil fra API: {response.status_code}")
                 return []
                 
-        except Exception as e:
-            logger.error(f"Kritisk feil i datahenting: {str(e)}")
+        except Exception:
             return []
 
     def _parse_vehicles(self, root, transport_type=None):
         vehicles = []
         try:
             activities = root.findall('.//ns:VehicleActivity', self.ns)
-            logger.info(f"Fant {len(activities)} aktiviteter å parse")
             
             for activity in activities:
                 try:
@@ -100,16 +103,13 @@ class EnturClient:
                                     'station': station
                                 }
                                 vehicles.append(vehicle_data)
-                                logger.info(f"La til {line}: {minutes} min forsinkelse ved {station}")
                             
                 except Exception as e:
-                    logger.error(f"Feil ved parsing av kjøretøy: {str(e)}")
                     continue
                     
             return vehicles
             
         except Exception as e:
-            logger.error(f"Feil ved parsing av data: {e}")
             return []
 
     def _parse_datetime(self, dt_str: str) -> datetime:

@@ -1,32 +1,41 @@
+import os
 from flask import Flask
 from flask_sqlalchemy import SQLAlchemy
+from flask_migrate import Migrate
+from config import Config
 import logging
-import os
 
-# Initialiser Flask med custom template og static folder
-template_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'templates'))
-static_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'static'))
-app = Flask(__name__, template_folder=template_dir, static_folder=static_dir)
+# Initialize Flask app
+app = Flask(__name__,
+    static_folder='../static',
+    template_folder='../templates'
+)
 
-# Database konfigurasjon
+# Set up logging
+logging.basicConfig(level=logging.INFO)
+app.logger.setLevel(logging.INFO)
+
+# Database config
+app.config.from_object(Config)
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///app.db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
-# Initialiser database
+# Ensure instance folder exists
+os.makedirs('instance', exist_ok=True)
+
+# Initialize database
 db = SQLAlchemy(app)
+migrate = Migrate(app, db)
 
-# Enkel logging til konsoll
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
+# Import routes after app is created
+from app.routes import init_routes
+init_routes(app)
 
-# Initialiser Entur client
-from app.entur_client import EnturClient
-entur_client = EnturClient()
-
-from app import routes, models
-
-# Opprett databasetabeller
+# Create database tables
 with app.app_context():
-    db.create_all() 
+    db.create_all()
+    app.logger.info('Database tables created successfully')
+
+# Start the scheduler
+from app.scheduler import start_scheduler
+scheduler = start_scheduler(app) 

@@ -1,282 +1,372 @@
 from flask import render_template, jsonify, request
-from app import app, db, entur_client
-from app.models import Delay, DailySummary
-from datetime import datetime, date, timedelta
+from app import app, db
+from app.logger import logger
+from app.models import Delay
+from datetime import datetime, timedelta
 from sqlalchemy import func, case
-import threading
-import time
+import json
 
-# Global variabler for å lagre data
-current_vehicles = []
-last_update = None
-data_lock = threading.Lock()
+def init_routes(app):
+    @app.route('/')
+    def index():
+        return render_template('index.html')
 
-def update_data():
-    """Oppdaterer data fra Entur API periodisk"""
-    global current_vehicles, last_update
-    
-    with app.app_context():
-        while True:
-            try:
-                new_vehicles = entur_client.get_realtime_data()
-                current_time = datetime.now()
-                
-                with data_lock:
-                    # Legg til timestamp på nye kjøretøy
-                    for vehicle in new_vehicles:
-                        vehicle['timestamp'] = current_time
-                    
-                    # Fjern duplikater basert på journey_ref og oppdater eksisterende
-                    existing_refs = {v['journey_ref']: i for i, v in enumerate(current_vehicles)}
-                    
-                    for vehicle in new_vehicles:
-                        if vehicle['journey_ref'] in existing_refs:
-                            # Oppdater kun hvis forsinkelsen har endret seg
-                            old_idx = existing_refs[vehicle['journey_ref']]
-                            if vehicle['delay_minutes'] != current_vehicles[old_idx]['delay_minutes']:
-                                current_vehicles[old_idx] = vehicle
-                        else:
-                            current_vehicles.append(vehicle)
-                    
-                    last_update = current_time
-                    
-                    # Fjern gamle data (eldre enn 3 timer)
-                    three_hours_ago = current_time - timedelta(hours=3)
-                    current_vehicles = [v for v in current_vehicles if v['timestamp'] > three_hours_ago]
-                    
-                    # Lagre til database for historisk statistikk
-                    try:
-                        for vehicle in new_vehicles:
-                            # Sjekk om journey_reference allerede eksisterer
-                            existing = Delay.query.filter_by(
-                                journey_reference=vehicle['journey_ref']
-                            ).first()
-                            
-                            if not existing:
-                                delay = Delay(
-                                    journey_reference=vehicle['journey_ref'],
-                                    line=vehicle['line'],
-                                    line_name=vehicle['line_name'],
-                                    transport_type=vehicle['transport_type'],
-                                    delay_minutes=vehicle['delay_minutes'],
-                                    station=vehicle['station'],
-                                    timestamp=current_time
-                                )
-                                db.session.add(delay)
-                        
-                        db.session.commit()
-                    except Exception as e:
-                        db.session.rollback()
-                        app.logger.error(f"Feil ved lagring til database: {e}")
-                
-            except Exception as e:
-                app.logger.error(f"Feil ved datahenting: {e}")
+    @app.route('/api/stats')
+    def get_stats():
+        try:
+            transport_type = request.args.get('transport_type', 'all')
+            query = db.session.query(Delay)
+            if transport_type != 'all':
+                query = query.filter_by(transport_type=transport_type)
             
-            time.sleep(30)  # Vent 30 sekunder
+            delays = query.all()
+            return jsonify([{
+                'line': d.line,
+                'station': d.station,
+                'delay_minutes': d.delay_minutes
+            } for d in delays])
+            
+        except Exception as e:
+            return jsonify([])
 
-def calculate_stats(vehicles):
-    stats = {
-        'summary': {
-            'total_trips': len(vehicles),
-            'total_delay': sum(v['delay_minutes'] for v in vehicles),
-            'avg_delay': 0,
-            'punctuality': 0,
-            'on_time': sum(1 for v in vehicles if v['delay_minutes'] <= 3)
-        },
-        'transport_distribution': {
-            'rail': {'count': 0, 'name': 'Tog', 'percentage': 0},
-            'bus': {'count': 0, 'name': 'Buss', 'percentage': 0},
-            'tram': {'count': 0, 'name': 'Trikk', 'percentage': 0}
-        },
-        'delay_distribution': {
-            '0-5': 0,
-            '5-10': 0,
-            '10-15': 0,
-            '15-30': 0,
-            '30+': 0
-        },
-        'top_delays': []
-    }
-    
-    if not vehicles:
-        return stats
-    
-    # Beregn gjennomsnitt og punktlighet
-    if stats['summary']['total_trips'] > 0:
-        stats['summary']['avg_delay'] = round(
-            stats['summary']['total_delay'] / stats['summary']['total_trips'], 
-            1
-        )
-        stats['summary']['punctuality'] = round(
-            (stats['summary']['on_time'] / stats['summary']['total_trips']) * 100,
-            1
-        )
-    
-    # Beregn fordeling av transportmidler
-    total_delayed = len(vehicles)
-    for vehicle in vehicles:
-        # Transport type fordeling
-        t_type = vehicle['transport_type']
-        if t_type in stats['transport_distribution']:
-            stats['transport_distribution'][t_type]['count'] += 1
-        
-        # Forsinkelsesfordeling
-        delay = vehicle['delay_minutes']
-        if delay <= 5:
-            stats['delay_distribution']['0-5'] += 1
-        elif delay <= 10:
-            stats['delay_distribution']['5-10'] += 1
-        elif delay <= 15:
-            stats['delay_distribution']['10-15'] += 1
-        elif delay <= 30:
-            stats['delay_distribution']['15-30'] += 1
-        else:
-            stats['delay_distribution']['30+'] += 1
-    
-    # Beregn prosentandel for transportmidler
-    if total_delayed > 0:
-        for t_type in stats['transport_distribution']:
-            count = stats['transport_distribution'][t_type]['count']
-            stats['transport_distribution'][t_type]['percentage'] = round(
-                (count / total_delayed) * 100,
-                1
+    @app.route('/total_stats')
+    def get_total_stats():
+        try:
+            transport_type = request.args.get('transport_type', 'all')
+            last_24h = datetime.now() - timedelta(hours=24)
+            
+            query = Delay.query.filter(Delay.timestamp >= last_24h)
+            
+            if transport_type != 'all':
+                query = query.filter(Delay.transport_type == transport_type)
+            
+            total_trips = query.count()
+            delayed_trips = query.filter(Delay.delay_minutes > 1).count()
+            avg_delay = db.session.query(func.avg(Delay.delay_minutes)).filter(
+                Delay.timestamp >= last_24h
+            ).scalar() or 0
+            
+            punctuality = round(100 - (delayed_trips / total_trips * 100), 1) if total_trips > 0 else 100
+            
+            return jsonify({
+                'total_trips': total_trips,
+                'total_delays': delayed_trips,
+                'avg_delay': round(float(avg_delay), 1),
+                'punctuality': punctuality
+            })
+            
+        except Exception as e:
+            return jsonify({
+                'total_trips': 0,
+                'total_delays': 0,
+                'avg_delay': 0,
+                'punctuality': 100
+            })
+
+    @app.route('/delay_distribution')
+    def get_delay_distribution():
+        try:
+            transport_type = request.args.get('transport_type', 'all')
+            last_24h = datetime.now() - timedelta(hours=24)
+            
+            query = db.session.query(
+                case(
+                    (Delay.delay_minutes <= 5, '0-5'),
+                    (Delay.delay_minutes <= 10, '6-10'),
+                    (Delay.delay_minutes <= 15, '11-15'),
+                    (Delay.delay_minutes <= 20, '16-20'),
+                    else_='20+'
+                ).label('delay_range'),
+                func.count(Delay.id).label('count')
+            ).filter(
+                Delay.timestamp >= last_24h
             )
-    
-    # Beregn prosentandel for forsinkelsesfordeling
-    for key in stats['delay_distribution']:
-        stats['delay_distribution'][key] = round(
-            (stats['delay_distribution'][key] / total_delayed) * 100,
-            1
-        ) if total_delayed > 0 else 0
-    
-    # Finn topp 5 forsinkelser
-    sorted_vehicles = sorted(vehicles, key=lambda x: x['delay_minutes'], reverse=True)
-    stats['top_delays'] = [{
-        'line': v['line'],
-        'name': v['line_name'],
-        'type': stats['transport_distribution'][v['transport_type']]['name'],
-        'station': v['station'],
-        'delay': v['delay_minutes']
-    } for v in sorted_vehicles[:5]]
-    
-    return stats
-
-@app.route('/')
-def index():
-    return render_template('dashboard.html')
-
-@app.route('/weekly_stats')
-def get_weekly_stats():
-    """Henter statistikk for siste uke"""
-    try:
-        # Hent data for siste 7 dager
-        end_date = datetime.now()
-        start_date = end_date - timedelta(days=7)
-        
-        # Hent daglig statistikk
-        daily_stats = db.session.query(
-            func.date(Delay.timestamp).label('date'),
-            func.count(Delay.id).label('total_delays'),
-            func.avg(Delay.delay_minutes).label('avg_delay'),
-            func.sum(Delay.delay_minutes).label('total_delay_minutes'),
-            func.sum(case((Delay.delay_minutes < 3, 1), else_=0)).label('on_time')
-        ).filter(
-            Delay.timestamp.between(start_date, end_date)
-        ).group_by(
-            func.date(Delay.timestamp)
-        ).all()
-        
-        # Formater data for frontend
-        stats = {
-            'dates': [],
-            'delays': [],
-            'avg_delays': [],
-            'total_minutes': [],
-            'punctuality': 0,
-            'avg_delay': 0
-        }
-        
-        total_delays = 0
-        total_minutes = 0
-        total_on_time = 0
-        
-        for day in daily_stats:
-            # Konverter date til string direkte (siden det allerede er en date)
-            stats['dates'].append(day.date.strftime('%d.%m') if isinstance(day.date, datetime) else str(day.date))
-            stats['delays'].append(day.total_delays)
-            stats['avg_delays'].append(float(day.avg_delay or 0))
-            stats['total_minutes'].append(int(day.total_delay_minutes or 0))
             
-            total_delays += day.total_delays
-            total_minutes += (day.total_delay_minutes or 0)
-            total_on_time += day.on_time
-        
-        # Beregn punktlighet og snitt forsinkelse
-        if total_delays > 0:
-            stats['punctuality'] = round((total_on_time / total_delays) * 100, 1)
-            stats['avg_delay'] = round(total_minutes / total_delays, 1)
-        
-        app.logger.info(f"Generert ukentlig statistikk: {stats}")  # Legg til logging
-        return jsonify(stats)
-        
-    except Exception as e:
-        app.logger.error(f"Feil ved henting av ukentlig statistikk: {str(e)}")
-        return jsonify({'error': 'Kunne ikke hente statistikk'}), 500
+            if transport_type != 'all':
+                query = query.filter(Delay.transport_type == transport_type)
+            
+            results = query.group_by('delay_range').all()
+            
+            distribution = {
+                '0-5': 0,
+                '6-10': 0,
+                '11-15': 0,
+                '16-20': 0,
+                '20+': 0
+            }
+            
+            for delay_range, count in results:
+                distribution[delay_range] = count
+            
+            return jsonify(distribution)
+        except Exception as e:
+            return jsonify({})
 
-@app.route('/api/stats')
-def get_stats():
-    transport_type = request.args.get('transport_type', 'all')
-    
-    with data_lock:
-        vehicles = current_vehicles
-        if transport_type != 'all':
-            vehicles = [v for v in vehicles if v['transport_type'] == transport_type]
-        
-        stats = calculate_stats(vehicles)
-        return jsonify(stats)
-
-@app.route('/total_stats')
-def get_total_stats():
-    """Henter total statistikk for året"""
-    try:
-        # Hent alle forsinkelser for året
-        year_start = datetime(2025, 1, 1)
-        year_end = datetime(2025, 12, 31, 23, 59, 59)
-        
-        # Hent totale forsinkelser per transporttype
-        stats = db.session.query(
-            Delay.transport_type,
-            func.sum(Delay.delay_minutes).label('total_minutes')
-        ).filter(
-            Delay.timestamp.between(year_start, year_end)
-        ).group_by(
-            Delay.transport_type
-        ).all()
-        
-        # Initialiser resultat
-        result = {
-            'total_minutes': 0,
-            'bus_minutes': 0,
-            'train_minutes': 0,
-            'tram_minutes': 0
-        }
-        
-        # Summer opp forsinkelser per transporttype
-        for transport_type, minutes in stats:
-            result['total_minutes'] += minutes or 0
-            if transport_type == 'bus':
-                result['bus_minutes'] = minutes or 0
-            elif transport_type == 'rail':
-                result['train_minutes'] = minutes or 0
+    @app.route('/top_delays')
+    def get_top_delays():
+        try:
+            transport_type = request.args.get('transport_type', 'all')
+            query = Delay.query
+            
+            if transport_type == 'rail':
+                query = query.filter(Delay.transport_type == 'rail')
+            elif transport_type == 'bus':
+                query = query.filter(Delay.transport_type == 'bus')
             elif transport_type == 'tram':
-                result['tram_minutes'] = minutes or 0
-        
-        return jsonify(result)
-        
-    except Exception as e:
-        app.logger.error(f"Feil ved henting av total statistikk: {str(e)}")
-        return jsonify({'error': 'Kunne ikke hente statistikk'}), 500
+                query = query.filter(Delay.transport_type == 'tram')
+            
+            top_delays = query.order_by(
+                Delay.delay_minutes.desc()
+            ).limit(10).all()
+            
+            return jsonify([{
+                'line': delay.line,
+                'station': delay.station,
+                'delay_minutes': delay.delay_minutes,
+                'transport_type': delay.transport_type,
+                'timestamp': delay.timestamp.isoformat() if delay.timestamp else None
+            } for delay in top_delays])
+        except Exception as e:
+            return jsonify([])
 
-# Start bakgrunnsjobb for dataoppdatering
-update_thread = threading.Thread(target=update_data, daemon=True)
-update_thread.start() 
+    @app.route('/weekly_stats')
+    def get_weekly_stats():
+        try:
+            transport_type = request.args.get('transport_type', 'all')
+            now = datetime.now()
+            start_date = (now - timedelta(days=6)).replace(hour=0, minute=0, second=0, microsecond=0)
+            
+            base_query = db.session.query(
+                func.date(Delay.timestamp).label('date'),
+                func.count(Delay.id).label('count')
+            ).filter(
+                Delay.timestamp >= start_date
+            )
+            
+            if transport_type != 'all':
+                base_query = base_query.filter(Delay.transport_type == transport_type)
+            
+            results = base_query.group_by(
+                func.date(Delay.timestamp)
+            ).order_by(
+                func.date(Delay.timestamp)
+            ).all()
+            
+            # Opprett dictionary med alle dager
+            data_dict = {}
+            current_date = start_date
+            while current_date.date() <= now.date():
+                current_key = current_date.date()
+                data_dict[str(current_key)] = 0
+                current_date += timedelta(days=1)
+            
+            # Fyll inn faktiske verdier fra databasen
+            for date, count in results:
+                date_str = str(date)
+                if date_str in data_dict:
+                    data_dict[date_str] = count
+            
+            # Konverter til liste med riktig format
+            weekdays = ['Man', 'Tir', 'Ons', 'Tor', 'Fre', 'Lør', 'Søn']
+            data = []
+            
+            for date_str in sorted(data_dict.keys()):
+                date_obj = datetime.strptime(date_str, '%Y-%m-%d').date()
+                data.append({
+                    'date': date_obj.strftime('%d.%m'),
+                    'weekday': weekdays[date_obj.weekday()],
+                    'count': data_dict[date_str]
+                })
+                
+            return jsonify({'data': data})
+            
+        except Exception as e:
+            return jsonify({'data': [], 'error': str(e)})
+
+    @app.route('/debug_db')
+    def debug_db():
+        try:
+            delays = Delay.query.all()
+            return jsonify([{
+                'id': d.id,
+                'line': d.line,
+                'station': d.station,
+                'delay_minutes': d.delay_minutes,
+                'transport_type': d.transport_type
+            } for d in delays])
+        except Exception as e:
+            return jsonify({'error': str(e)})
+
+    @app.route('/total_waiting_time')
+    def get_total_waiting_time():
+        try:
+            start_date = datetime(2025, 1, 1)
+            end_date = datetime(2025, 12, 31)
+            
+            results = db.session.query(
+                Delay.transport_type,
+                func.sum(Delay.delay_minutes).label('total_minutes')
+            ).filter(
+                Delay.timestamp.between(start_date, end_date)
+            ).group_by(Delay.transport_type).all()
+            
+            waiting_times = {
+                'bus': 0,
+                'rail': 0,
+                'tram': 0,
+                'total': 0
+            }
+            
+            for transport_type, minutes in results:
+                if transport_type in waiting_times:
+                    waiting_times[transport_type] = int(minutes or 0)
+                    waiting_times['total'] += int(minutes or 0)
+            
+            total_minutes = waiting_times['total']
+            total_hours = total_minutes // 60
+            total_days = total_hours // 24
+            
+            waiting_times['formatted_total'] = f"{total_days} dager {total_hours % 24} timer"
+            
+            return jsonify(waiting_times)
+            
+        except Exception as e:
+            return jsonify({
+                'bus': 0,
+                'rail': 0,
+                'tram': 0,
+                'total': 0,
+                'formatted_total': "0 dager 0 timer"
+            })
+
+    @app.route('/operator_stats')
+    def get_operator_stats():
+        try:
+            transport_type = request.args.get('transport_type', 'all')
+            last_24h = datetime.now() - timedelta(hours=24)
+            
+            query = db.session.query(
+                Delay.operator,
+                Delay.transport_type,
+                func.count(Delay.id).label('delays'),
+                func.sum(Delay.delay_minutes).label('total_delay_minutes')
+            ).filter(
+                Delay.timestamp >= last_24h,
+                Delay.delay_minutes > 1
+            )
+            
+            if transport_type != 'all':
+                query = query.filter(Delay.transport_type == transport_type)
+            
+            results = query.group_by(
+                Delay.operator,
+                Delay.transport_type
+            ).all()
+            
+            operator_stats = {}
+            for operator, transport_type, delays, total_delay_minutes in results:
+                if not operator:
+                    operator = "Ukjent operatør"
+                    
+                total_trips = db.session.query(func.count(Delay.id)).filter(
+                    Delay.timestamp >= last_24h,
+                    Delay.operator == operator
+                ).scalar() or 0
+                
+                operator_stats[operator] = {
+                    'transport_type': transport_type,
+                    'delays': delays,
+                    'total_delay_minutes': total_delay_minutes,
+                    'total_trips': total_trips
+                }
+            
+            return jsonify(operator_stats)
+            
+        except Exception as e:
+            return jsonify({})
+
+    @app.route('/line_stats')
+    def get_line_stats():
+        try:
+            transport_type = request.args.get('transport_type', 'all')
+            last_24h = datetime.now() - timedelta(hours=24)
+            
+            total_records = Delay.query.count()
+            recent_records = Delay.query.filter(Delay.timestamp >= last_24h).count()
+            
+            query = db.session.query(
+                Delay.line,
+                Delay.transport_type,
+                func.count(Delay.id).label('delays'),
+                func.sum(Delay.delay_minutes).label('total_delay_minutes'),
+                func.avg(Delay.delay_minutes).label('avg_delay')
+            ).filter(
+                Delay.timestamp >= last_24h,
+                Delay.delay_minutes > 1
+            )
+            
+            if transport_type != 'all':
+                query = query.filter(Delay.transport_type == transport_type)
+            
+            results = query.group_by(
+                Delay.line,
+                Delay.transport_type
+            ).order_by(
+                func.sum(Delay.delay_minutes).desc()
+            ).limit(5).all()
+            
+            line_stats = {}
+            for line, transport_type, delays, total_delay_minutes, avg_delay in results:
+                if not line:
+                    continue
+                
+                total_trips = db.session.query(func.count(Delay.id)).filter(
+                    Delay.timestamp >= last_24h,
+                    Delay.line == line
+                ).scalar() or 0
+                
+                line_stats[line] = {
+                    'transport_type': transport_type,
+                    'delays': delays,
+                    'total_trips': total_trips,
+                    'total_delay_minutes': int(total_delay_minutes),
+                    'avg_delay': round(float(avg_delay), 1)
+                }
+            
+            return jsonify(line_stats)
+            
+        except Exception as e:
+            return jsonify({})
+
+    @app.route('/transport_distribution')
+    def get_transport_distribution():
+        try:
+            last_24h = datetime.now() - timedelta(hours=24)
+            
+            results = db.session.query(
+                Delay.transport_type,
+                func.count(Delay.id).label('count')
+            ).filter(
+                Delay.timestamp >= last_24h
+            ).group_by(
+                Delay.transport_type
+            ).all()
+            
+            total_delays = sum(count for _, count in results)
+            distribution = {
+                'rail': 0,
+                'bus': 0,
+                'tram': 0
+            }
+            
+            if total_delays > 0:
+                for transport_type, count in results:
+                    if transport_type in distribution:
+                        distribution[transport_type] = round((count / total_delays) * 100)
+            
+            return jsonify(distribution)
+            
+        except Exception as e:
+            return jsonify({'rail': 0, 'bus': 0, 'tram': 0})
+
+    return app 

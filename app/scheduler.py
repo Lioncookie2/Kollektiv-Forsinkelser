@@ -1,46 +1,63 @@
-import threading
-import time
-from app.extensions import db, entur_client
+from app import db, app
+from app.models import Delay
+from app.entur_client import EnturClient
+from datetime import datetime
+from sqlalchemy.exc import IntegrityError
 
-class DataCollector:
-    def __init__(self, interval):
-        self.interval = interval
-        self.thread = None
-        self.running = False
-
-    def start(self):
-        if self.thread is not None:
-            return
-
-        self.running = True
-        self.thread = threading.Thread(target=self._run)
-        self.thread.daemon = True
-        self.thread.start()
-
-    def stop(self):
-        self.running = False
-        if self.thread is not None:
-            self.thread.join()
-            self.thread = None
-
-    def _run(self):
-        while self.running:
+def start_scheduler(app):
+    from apscheduler.schedulers.background import BackgroundScheduler
+    scheduler = BackgroundScheduler()
+    
+    def scheduled_task():
+        with app.app_context():
             try:
-                self._collect_data()
+                client = EnturClient()
+                vehicles = client.get_realtime_data()
+                
+                if not vehicles:
+                    return
+                
+                # Lagre til database
+                new_delays = 0
+                for vehicle in vehicles:
+                    try:
+                        # Sjekk om journey_reference allerede eksisterer
+                        existing = Delay.query.filter_by(
+                            journey_reference=vehicle['journey_ref']
+                        ).first()
+                        
+                        if existing:
+                            continue
+                            
+                        delay = Delay(
+                            timestamp=datetime.now(),
+                            line=vehicle['line'],
+                            station=vehicle['station'],
+                            delay_minutes=vehicle['delay_minutes'],
+                            transport_type=vehicle['transport_type'],
+                            journey_reference=vehicle['journey_ref']
+                        )
+                        db.session.add(delay)
+                        db.session.commit()
+                        new_delays += 1
+                        
+                    except IntegrityError:
+                        db.session.rollback()
+                        continue
+                    except Exception as e:
+                        db.session.rollback()
+                        continue
+                
             except Exception as e:
-                print(f"Feil ved datainnhenting: {e}")
-            time.sleep(self.interval)
-
-    def _collect_data(self):
-        trains = entur_client.get_realtime_data()
-        
-        for train in trains:
-            try:
-                db.save_delay(
-                    train['line'],
-                    train['station'],
-                    train['scheduled_time'],
-                    train['expected_time']
-                )
-            except Exception as e:
-                print(f"Feil ved lagring av togdata: {e}") 
+                db.session.rollback()
+    
+    # Kjør hvert 30. sekund
+    scheduler.add_job(
+        scheduled_task,
+        'interval',
+        seconds=30,
+        id='check_delays'
+    )
+    
+    scheduler.start()
+    return scheduler 
