@@ -5,10 +5,7 @@ from app.config import Config
 import os
 
 def create_app():
-    app = Flask(__name__, 
-        static_folder='../static',
-        template_folder='../templates'
-    )
+    app = Flask(__name__)
 
     # Load config
     app.config.from_object(Config)
