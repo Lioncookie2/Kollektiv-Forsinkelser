@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="no">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Kollektiv Forsinkelser</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <div class="container">
+        <h1>Kollektiv Forsinkelser</h1>
+        
+        <div class="transport-selector">
+            <button class="transport-btn active" data-type="all">
+                <span>Alle</span>
+            </button>
+            <button class="transport-btn" data-type="bus">
+                <img src="{{ url_for('static', filename='icons/buss.svg') }}" alt="Buss">
+                <span>Buss</span>
+            </button>
+            <button class="transport-btn" data-type="rail">
+                <img src="{{ url_for('static', filename='icons/tog.svg') }}" alt="Tog">
+                <span>Tog</span>
+            </button>
+            <button class="transport-btn" data-type="tram">
+                <img src="{{ url_for('static', filename='icons/trikk.svg') }}" alt="Trikk">
+                <span>Trikk</span>
+            </button>
+        </div>
+
+        <div class="stats-container">
+            <div class="stat-box">
+                <h3>Totalt antall forsinkelser</h3>
+                <p id="total-delays">-</p>
+            </div>
+            <div class="stat-box">
+                <h3>Gjennomsnittlig forsinkelse</h3>
+                <p id="avg-delay">-</p>
+            </div>
+            <div class="stat-box">
+                <h3>Punktlighet siste 7 dager</h3>
+                <p id="punctuality">-</p>
+            </div>
+        </div>
+
+        <div class="delays-container">
+            <h2>Aktive forsinkelser</h2>
+            <div id="delays-list"></div>
+        </div>
+
+        <div class="chart-container">
+            <h2>Forsinkelser siste 7 dager</h2>
+            <canvas id="weekly-chart"></canvas>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="{{ url_for('static', filename='js/dashboard.js') }}"></script>
+</body>
+</html> 
