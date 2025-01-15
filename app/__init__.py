@@ -19,8 +19,10 @@ db.init_app(app)
 from app.entur_client import EnturClient
 entur_client = EnturClient()
 
-# Ensure instance folder exists
-os.makedirs('instance', exist_ok=True)
+# Ensure database directory exists
+db_dir = os.path.dirname(app.config['SQLALCHEMY_DATABASE_URI'].replace('sqlite:///', ''))
+if db_dir:
+    os.makedirs(db_dir, exist_ok=True)
 
 # Create database tables
 with app.app_context():
