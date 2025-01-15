@@ -15,6 +15,10 @@ app.config.from_object(Config)
 # Initialize extensions
 db.init_app(app)
 
+# Create EnturClient instance
+from app.entur_client import EnturClient
+entur_client = EnturClient()
+
 # Ensure instance folder exists
 os.makedirs('instance', exist_ok=True)
 

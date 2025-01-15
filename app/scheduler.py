@@ -1,6 +1,5 @@
 from apscheduler.schedulers.background import BackgroundScheduler
-from app.entur_client import update_delays
-from flask import current_app
+from app.tasks import update_delays
 
 def start_scheduler():
     scheduler = BackgroundScheduler()
